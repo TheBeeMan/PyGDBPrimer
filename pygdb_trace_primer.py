@@ -8,12 +8,13 @@ import gdb
 
 x16_entry = 0
 x16_exit = 0
-tmp_hwpoint = None
+wp_num = 0
+wwps = {}
 
 def prRed(skk): print("\033[91m {}\033[00m" .format(skk))
 def prBlue(skk): print("\033[0;49;34m {}\033[00m" .format(skk))
 def prGreen(skk): print("\033[0;49;32m {}\033[00m" .format(skk))
-def prYellow(skk): print("\033[93m {}\033[00m" .format(skk))
+def prYellow(skk): print("\033[0;49;33m {}\033[00m" .format(skk))
 def prLightPurple(skk): print("\033[94m {}\033[00m" .format(skk))
 def prPurple(skk): print("\033[95m {}\033[00m" .format(skk))
 def prCyan(skk): print("\033[96m {}\033[00m" .format(skk))
@@ -58,8 +59,9 @@ class WatchPoint(gdb.Breakpoint):
 
     def stop(self):
         end_pc = gdb.parse_and_eval('$pc')
-        prRed("[+] HIT WP @ %s" % (end_pc))
-        return True
+        prYellow("[!] HIT WP @ {:s}".format(end_pc))
+        #return True
+        return False
 
 class TestBreakPoints(object):
     def run_test(self):
@@ -144,12 +146,12 @@ class EntryReg16Tracer(gdb.Breakpoint):
         R16 = self.get_x16() 
         self.record(R16)
         if not R16: 
-            prRed("[!] x16 is 0, at [ftrace_regs_caller entry], sp points to {}".format( \
+            prRed("[!] x16 is 0, at [ftrace_regs_caller entry], sp @ {}".format( \
                     gdb.parse_and_eval("$sp")))
             return True
 
-        prBlue("===========================================================================================") 
-        prGreen("[+] x16 is 0x{:x}, at [ftrace_regs_caller entry], sp points to {}".format( \
+        prBlue("===================================================================================================") 
+        prGreen("[+] x16 is 0x{:x}, at [ftrace_regs_caller entry], sp @ {}".format( \
                     R16 if R16 >= 0 else 1<<64 + R16, gdb.parse_and_eval("$sp")))
         # We want to add written watchpoint once reaches here
         self.set_hwpoint(128)
@@ -172,13 +174,16 @@ class EntryReg16Tracer(gdb.Breakpoint):
     def set_hwpoint(self, offset):
         curr_sp = self.get_sp()
         dest = curr_sp + offset
-        global tmp_hwpoint
+        global wwps
         # On certain situation, add watchpoint will trigger RuntimeError 
         try:
-            tmp_hwpoint = WatchPoint(dest, gdb.WP_WRITE)
+            wp = WatchPoint(dest, gdb.WP_WRITE)
+            global wp_num
+            wp_num = wp.number
+            wwps[wp_num] = wp
         except:
             # Ignore the error and keep going
-            prYellow("[x] failed to add watchpoint")
+            prRed("[x] failed to add watchpoint")
             resume() 
 
 class ExitReg16Tracer(gdb.Breakpoint):
@@ -187,15 +192,25 @@ class ExitReg16Tracer(gdb.Breakpoint):
         self.record(R16)
         global x16_entry
         if not R16 and R16 != x16_entry: 
-            prRed("[!] x16 is 0x{:x} while x16_entry is 0x{:x}, at [ftrace return exit], sp points to {}".format( \
+            prRed("[!!!] x16 is 0x{:x} while x16_entry is 0x{:x}, at [ftrace return exit], sp @ {}".format( \
                     R16 if R16 >= 0 else 1<<64 + R16, x16_entry, gdb.parse_and_eval("$sp")))
             return True
             #return False
 
         # Global written watchpoint is not hit and everything is ok
-        prGreen("[+] watchpoint hit [{:d}] times, we will delete it".format(tmp_hwpoint.hit_count))
-        tmp_hwpoint.delete()
-        prGreen("[+] x16 keep unchanged and non-zero at [ftrace return exit], sp points to {}".format( \
+        global wp_num
+        if wwps[wp_num].is_valid():
+            prGreen("[+] watchpoint hit [{:d}] times, we will delete it".format(wwps[wp_num].hit_count))
+            wwps[wp_num].delete()
+        else:
+            prRed("[!] watchpoints is out of order, guess it is previous one")
+            try:
+                wp_num-=1
+                wwps[wp_num].delete()
+            except:
+                prRed("[!!] failed to delete watchpoint again.")
+
+        prGreen("[+] x16 keep unchanged and non-zero at [ftrace return exit], sp @ {}".format( \
                 gdb.parse_and_eval("$sp")))
         return False
 
