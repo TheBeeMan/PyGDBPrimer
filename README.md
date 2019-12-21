@@ -1,2 +1,2 @@
-# pygdb_trace_primer.py
-A sample code snippet of pyGdb primer, it aims to demonstrate using gdb in python context
+# Introduction
+A sample code of debugging kernel with pygdb plugin, it aims to demonstrate how to use gdb in python context
